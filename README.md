@@ -1,66 +1,48 @@
-# ⛏️ Mini-Block-Chain
+# Mini-Block-Chain ⛏️
 
-> A single-node Proof of Work minter written in Rust — built to understand the bare-metal primitives that power blockchain infrastructure.
-
----
-
-## Context
-
-I'm a CS student graduating in 2027, transitioning from web development (React, JavaScript) into protocol-level infrastructure engineering. I gave myself a strict **6-hour timebox** to write my first Rust program — not a "Hello World," but something that touches real cryptographic primitives.
-
-This project is my attempt to understand exactly what happens inside a blockchain node at the lowest level: how blocks are structured in memory, how SHA-256 hashing works, and why Proof of Work is computationally expensive to produce but trivially cheap to verify.
+Single-node Proof of Work miner written in Rust.  
+First Rust program I've ever written. Gave myself 6 hours.
 
 ---
 
-## What This Does
+## Why I built this
 
-1. **Constructs a `Block` struct** with strict Rust typing — index, timestamp, data payload, previous block hash, nonce, and current hash.
-2. **Hashes the block** using the SHA-256 algorithm (via the `sha2` crate), packing all block fields into a single deterministic input.
-3. **Mines the block** via Proof of Work — incrementing a nonce in a brute-force loop until the resulting SHA-256 hash starts with `0000` (4 leading zeros = our difficulty target).
-4. **Prints the fully mined block** to the terminal with all fields visible.
+I've been doing React and JavaScript for a while and wanted to understand what's
+actually happening inside a blockchain node — not conceptually, but in code.
+What does a block look like in memory? How does SHA-256 hashing actually work?
+Why is mining slow but verification instant?
 
----
-
-## Core Rust Concepts Demonstrated
-
-**Structs and `impl` blocks** — Data (`struct Block`) is separated from behavior (`impl Block`). Methods like `new`, `calculate_hash`, and `mine` are attached to the type cleanly, similar to classes but without inheritance.
-
-**Ownership and Borrowing** — `calculate_hash(&self)` borrows the block read-only; the borrow checker guarantees it cannot mutate any field. `mine(&mut self)` takes a mutable borrow, explicitly declaring intent to change `nonce` and `hash`. This distinction is enforced at compile time — not runtime.
-
-**No null, no garbage collector** — Rust has no `null` or `undefined`. Operations that can fail (like reading the system clock) return a `Result` type. `.unwrap()` is used here to say "crash immediately if this fails" rather than silently propagating a bad state.
-
-**Immutable by default** — `let mut genesis_block` requires explicit `mut` because Rust variables are immutable unless you opt in. This forces intentional design around what changes and what doesn't.
+So I gave myself a 6-hour timebox and wrote it in Rust, because if I'm going to
+poke at protocol-level stuff, I should probably stop using a garbage-collected language.
 
 ---
 
-## How Proof of Work Actually Functions
+## What it does
 
-SHA-256 has two properties that make it ideal for Proof of Work:
+1. Creates a `Block` struct — index, timestamp, data, previous hash, nonce, current hash
+2. Hashes the block with SHA-256, packing every field into a single input string
+3. Mines it — keeps incrementing the nonce until the hash starts with `0000`
+4. Prints the result
 
-- **Avalanche effect:** Changing even one character in the input produces a completely unrecognizable output. There is no gradual change.
-- **One-way:** Given a hash output, you cannot reverse-engineer the input. Finding a hash that meets a target condition requires pure brute force.
-
-Because the block's index, timestamp, data, and previous hash are all fixed, calculating the hash repeatedly yields the same result. The `nonce` is the only variable — a dummy counter that changes the input on every iteration, producing a new unpredictable hash each time. On average, finding a hash starting with `0000` requires ~65,536 attempts (16⁴ in the 2²⁵⁶ SHA-256 output space).
-
-Anyone can verify a valid block by running the hash once and checking the prefix — verification is instant. Production is expensive. That asymmetry is the entire point.
+That's it. No UI. No server. Just a block getting mined in a terminal.
 
 ---
 
-## Running It
+## Run it
 
-**Prerequisites:** Rust installed via `rustup`
-
+Need Rust installed. If you don't have it:
 ```bash
-# Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-# Clone and run
+Then:
+```bash
 git clone https://github.com/NITHISH-2006/Mini-Block-Chain.git
 cd Mini-Block-Chain
 cargo run
 ```
 
-**Expected output:**
+Output looks like this:
 ```
 Mining Genesis Block...
 Block Mined! Nonce required: 95190
@@ -74,58 +56,63 @@ Block {
 }
 ```
 
-*(Exact nonce will vary — timestamp changes the hash space on every run.)*
+The nonce changes every run because the timestamp is part of the hash input.
 
 ---
 
-## Project Structure
+## Things I actually learned writing this
 
+**Ownership stopped me from doing dumb things**  
+`calculate_hash(&self)` borrows the block to read it. `mine(&mut self)` explicitly
+says it's going to mutate. I couldn't mix those up even if I wanted to —
+the compiler just refuses to build. Coming from JS where you can mutate anything
+from anywhere, this was initially annoying, then obviously correct.
+
+**No null, no undefined, no surprises**  
+Reading the system clock returns a `Result`. `.unwrap()` says "crash here if
+this fails" instead of letting it silently break somewhere downstream. I kind of
+love this.
+
+**SHA-256 has no pattern**  
+Change one character anywhere in the input — different block index, one extra
+space in the data — and the output is completely unrecognizable. There's no
+gradient, no shortcut. The only way to find a hash starting with `0000` is to
+try ~65,000 times on average and get lucky. Verification is one hash call.
+That gap between producing and verifying a valid block is the whole point of PoW.
+
+---
+
+## Adjusting difficulty
+```rust
+genesis_block.mine("0000");   // ~65k attempts on average
+genesis_block.mine("00000");  // ~1M attempts — takes noticeably longer
+genesis_block.mine("000");    // ~4k attempts — almost instant
+```
+
+Each zero multiplies the expected work by 16.
+
+---
+
+## What's next
+
+- [ ] Add a `Blockchain` struct — a `Vec<Block>` with chain validation so tampering any block breaks everything after it
+- [ ] Parallel mining with `rayon` — split the nonce range across threads
+- [ ] `axum` HTTP layer — `GET /chain` and `POST /mine` so it runs as an actual node
+
+---
+
+## Project structure
 ```
 Mini-Block-Chain/
 ├── src/
-│   └── main.rs       # Block struct, impl, PoW mining logic, main()
-├── Cargo.toml        # Project manifest + sha2 dependency
-└── Cargo.lock        # Locked dependency versions
+│   └── main.rs
+├── Cargo.toml
+└── Cargo.lock
 ```
 
----
-
-## Dependencies
-
-| Crate | Purpose |
-|-------|---------|
-| `sha2` | SHA-256 cryptographic hashing |
+One dependency: `sha2` for SHA-256.
 
 ---
 
-## Adjusting Difficulty
-
-The difficulty target is set in `main()`:
-
-```rust
-genesis_block.mine("0000");   // 4 leading zeros — current setting
-genesis_block.mine("00000");  // 5 leading zeros — ~16x harder
-genesis_block.mine("000");    // 3 leading zeros — ~16x easier
-```
-
-Each additional zero multiplies the expected work by 16.
-
----
-
-## Roadmap — Phase 2
-
-- [ ] **Blockchain struct** — `Vec<Block>` with `add_block()` and `is_chain_valid()` to prove tamper-evidence across the full chain
-- [ ] **Multithreaded mining** — Use `rayon` to spawn parallel threads checking different nonce ranges simultaneously, demonstrating CPU-level performance optimization
-- [ ] **HTTP API** — Wrap in `axum` with `GET /chain` and `POST /mine` endpoints, deployable to AWS EC2 as a live infrastructure node
-
----
-
-## Why This Matters for Protocol Engineering
-
-Projects like Garden, and Solana are built in Rust specifically because the borrow checker eliminates memory bugs that would be catastrophic in financial infrastructure. Writing even a minimal system in Rust — where the compiler refuses to build unsafe code — builds the instinct for thinking about ownership, lifetimes, and concurrency that production protocol engineers use daily.
-
-This is my first step off the JavaScript comfort zone and into bare-metal infrastructure. More to come.
-
----
-
-*Built in a 6-hour timebox as a deliberate learning exercise. Not production code — a foundation to build from.*
+*First Rust project. 6-hour timebox. CS student, graduating 2027.*  
+*Trying to understand systems from the ground up before I have to work on them.*

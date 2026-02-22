@@ -6,7 +6,7 @@
 
 ## Context
 
-I'm a CS student graduating in 2027, transitioning from web development (React, JavaScript) into protocol-level infrastructure engineering. I gave myself a strict **4-hour timebox** to write my first Rust program — not a "Hello World," but something that touches real cryptographic primitives.
+I'm a CS student graduating in 2027, transitioning from web development (React, JavaScript) into protocol-level infrastructure engineering. I gave myself a strict **6-hour timebox** to write my first Rust program — not a "Hello World," but something that touches real cryptographic primitives.
 
 This project is my attempt to understand exactly what happens inside a blockchain node at the lowest level: how blocks are structured in memory, how SHA-256 hashing works, and why Proof of Work is computationally expensive to produce but trivially cheap to verify.
 
@@ -128,4 +128,4 @@ This is my first step off the JavaScript comfort zone and into bare-metal infras
 
 ---
 
-*Built in a 4-hour timebox as a deliberate learning exercise. Not production code — a foundation to build from.*
+*Built in a 6-hour timebox as a deliberate learning exercise. Not production code — a foundation to build from.*

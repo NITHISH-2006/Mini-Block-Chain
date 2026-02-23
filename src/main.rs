@@ -56,13 +56,42 @@ struct Blockchain{
 
 
 impl Blockchain {
-
-    fn new() -> Blockchain{
+    fn new(difficulty: &str) -> Blockchain {
         let mut genesis = Block::new(0, String::from("Genesis Block"), String::from("0"));
-        genesis.mine("0000");
+        genesis.mine(difficulty);
 
-        Blockchain { chain: vec![gensis], difficulty: String::from("0000") }
-    
+        Blockchain {
+            chain: vec![genesis],
+            difficulty: difficulty.to_string(),
+        }
+    }
+
+    fn add_block(&mut self, data: String) {
+        let previous_hash = self.chain.last().unwrap().hash.clone();
+        let index = self.chain.len() as u32;
+        let mut new_block = Block::new(index, data, previous_hash);
+        new_block.mine(&self.difficulty);
+        self.chain.push(new_block);
+    }
+
+    fn is_valid(&self) -> bool {
+        for i in 1..self.chain.len() {
+            let current = &self.chain[i];
+            let previous = &self.chain[i - 1];
+
+            // Check current block's hash is still correct
+            if current.hash != current.calculate_hash() {
+                println!("Block {} hash is corrupted!", i);
+                return false;
+            }
+
+            // Check the chain link is intact
+            if current.previous_hash != previous.hash {
+                println!("Block {} is disconnected from chain!", i);
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -71,12 +100,30 @@ impl Blockchain {
 
 
 
+
 fn main() {
-    println!("Mining Genesis Block...");
-    let mut genesis_block = Block::new(0, String::from("Genesis Block - Built for Hashira Context"), String::from("0"));
-    
-    // Require 4 leading zeros (Our arbitrary PoW difficulty)
-    genesis_block.mine("0000"); 
-    
-    println!("{:#?}", genesis_block);
+    println!("\n==============================");
+    println!("     Building Blockchain");
+    println!("==============================\n");
+
+    let mut blockchain = Blockchain::new("0000");
+
+    blockchain.add_block("Alice sends Bob 10 tokens".to_string());
+    blockchain.add_block("Bob sends Carol 5 tokens".to_string());
+    blockchain.add_block("Carol sends Dave 2 tokens".to_string());
+
+    println!("\n--- Full Chain ---");
+    for block in &blockchain.chain {
+        println!("{:#?}", block);
+    }
+
+    println!("\n--- Validation (clean chain) ---");
+    println!("Chain valid: {}", blockchain.is_valid());
+
+    // Tamper demo
+    println!("\n--- Simulating Tamper Attack ---");
+    blockchain.chain[1].data = "Alice sends Bob 1000 tokens".to_string();
+
+    println!("\n--- Validation (after tamper) ---");
+    println!("Chain valid: {}", blockchain.is_valid());
 }

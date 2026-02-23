@@ -48,6 +48,29 @@ impl Block {
     }
 }
 
+#[derive(Debug)]
+struct Blockchain{
+    chain : Vec<Block>,
+    difficulty : String,
+}
+
+
+impl Blockchain {
+
+    fn new() -> Blockchain{
+        let mut genesis = Block::new(0, String::from("Genesis Block"), String::from("0"));
+        genesis.mine("0000");
+
+        Blockchain { chain: vec![gensis], difficulty: String::from("0000") }
+    
+    }
+}
+
+
+
+
+
+
 fn main() {
     println!("Mining Genesis Block...");
     let mut genesis_block = Block::new(0, String::from("Genesis Block - Built for Hashira Context"), String::from("0"));

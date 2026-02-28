@@ -1,129 +1,130 @@
-use sha2::{Sha256, Digest};
-use std::time::{SystemTime, UNIX_EPOCH};
+// ============================================================
+// MINI BLOCKCHAIN v2.1 — Nithish Chandrasekaran
+// ============================================================
 
-#[derive(Debug)]
-struct Block {
-    index: u32,
-    timestamp: u64,
-    data: String,
-    previous_hash: String,
-    nonce: u64,
-    hash: String,
-}
+mod wallet;
+mod transaction;
+mod block;
+mod blockchain;
 
-impl Block {
-    // Constructor for a new block
-    fn new(index: u32, data: String, previous_hash: String) -> Block {
-        Block {
-            index,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-            data,
-            previous_hash,
-            nonce: 0,
-            hash: String::new(),
-        }
-    }
-
-    // Hashes the block's current state
-    fn calculate_hash(&self) -> String {
-        let mut hasher = Sha256::new();
-        // Pack all block data into a single string
-        let input = format!("{}{}{}{}{}", self.index, self.timestamp, self.data, self.previous_hash, self.nonce);
-        hasher.update(input.as_bytes());
-        let result = hasher.finalize();
-        format!("{:x}", result)
-    }
-
-    // The Proof of Work algorithm
-    fn mine(&mut self, difficulty_prefix: &str) {
-        loop {
-            self.hash = self.calculate_hash();
-            if self.hash.starts_with(difficulty_prefix) {
-                println!("Block Mined! Nonce required: {}", self.nonce);
-                break;
-            }
-            // If the hash doesn't meet the target, increment the nonce and try again
-            self.nonce += 1;
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Blockchain{
-    chain : Vec<Block>,
-    difficulty : String,
-}
-
-
-impl Blockchain {
-    fn new(difficulty: &str) -> Blockchain {
-        let mut genesis = Block::new(0, String::from("Genesis Block"), String::from("0"));
-        genesis.mine(difficulty);
-
-        Blockchain {
-            chain: vec![genesis],
-            difficulty: difficulty.to_string(),
-        }
-    }
-
-    fn add_block(&mut self, data: String) {
-        let previous_hash = self.chain.last().unwrap().hash.clone();
-        let index = self.chain.len() as u32;
-        let mut new_block = Block::new(index, data, previous_hash);
-        new_block.mine(&self.difficulty);
-        self.chain.push(new_block);
-    }
-
-    fn is_valid(&self) -> bool {
-        for i in 1..self.chain.len() {
-            let current = &self.chain[i];
-            let previous = &self.chain[i - 1];
-
-            // Check current block's hash is still correct
-            if current.hash != current.calculate_hash() {
-                println!("Block {} hash is corrupted!", i);
-                return false;
-            }
-
-            // Check the chain link is intact
-            if current.previous_hash != previous.hash {
-                println!("Block {} is disconnected from chain!", i);
-                return false;
-            }
-        }
-        true
-    }
-}
-
-
-
-
-
-
+use wallet::Wallet;
+use transaction::Transaction;
+use blockchain::Blockchain;
 
 fn main() {
-    println!("\n==============================");
-    println!("     Building Blockchain");
-    println!("==============================\n");
+    println!("╔══════════════════════════════════════════════╗");
+    println!("║     Mini Blockchain v2.1 — Rust              ║");
+    println!("║     Wallets · Transactions · PoW · Mempool   ║");
+    println!("╚══════════════════════════════════════════════╝\n");
 
-    let mut blockchain = Blockchain::new("0000");
+    // ── WALLETS ───────────────────────────────────────────────
+    println!("👛 Generating wallets...");
+    let alice = Wallet::new();
+    let bob   = Wallet::new();
+    let carol = Wallet::new();
+    let miner = Wallet::new();
 
-    blockchain.add_block("Alice sends Bob 10 tokens".to_string());
-    blockchain.add_block("Bob sends Carol 5 tokens".to_string());
-    blockchain.add_block("Carol sends Dave 2 tokens".to_string());
+    println!("  Alice : {}...", &alice.address()[..20]);
+    println!("  Bob   : {}...", &bob.address()[..20]);
+    println!("  Carol : {}...", &carol.address()[..20]);
+    println!("  Miner : {}...", &miner.address()[..20]);
 
-    println!("\n--- Full Chain ---");
-    for block in &blockchain.chain {
-        println!("{:#?}", block);
+    // ── BLOCKCHAIN ────────────────────────────────────────────
+    println!();
+    let mut bc = Blockchain::new("00"); // "00" = fast for demo, use "0000" for real
+
+    // ── BLOCK 1 TRANSACTIONS ──────────────────────────────────
+    println!("\n📝 Preparing block 1 transactions...");
+
+    // Starter grant: NETWORK gives Alice 100 tokens (no signature needed)
+    let starter = Transaction::new("NETWORK".to_string(), alice.address(), 100.0);
+    handle(bc.add_transaction(starter), "Network → Alice (100 tokens)");
+
+    // Alice → Bob: must sign with Alice's wallet
+    let mut t1 = Transaction::new(alice.address(), bob.address(), 30.0);
+    handle(t1.sign(&alice), "Alice signs txn");
+    handle(bc.add_transaction(t1), "Alice → Bob (30 tokens)");
+
+    // Bob → Carol
+    let mut t2 = Transaction::new(bob.address(), carol.address(), 15.0);
+    handle(t2.sign(&bob), "Bob signs txn");
+    handle(bc.add_transaction(t2), "Bob → Carol (15 tokens)");
+
+    handle(bc.mine_pending_transactions(miner.address()), "Mine block 1");
+
+    // ── BLOCK 2 TRANSACTIONS ──────────────────────────────────
+    println!("📝 Preparing block 2 transactions...");
+
+    let mut t3 = Transaction::new(carol.address(), alice.address(), 5.0);
+    handle(t3.sign(&carol), "Carol signs txn");
+    handle(bc.add_transaction(t3), "Carol → Alice (5 tokens)");
+
+    let mut t4 = Transaction::new(alice.address(), carol.address(), 10.0);
+    handle(t4.sign(&alice), "Alice signs txn");
+    handle(bc.add_transaction(t4), "Alice → Carol (10 tokens)");
+
+    handle(bc.mine_pending_transactions(miner.address()), "Mine block 2");
+
+    // ── FULL CHAIN ────────────────────────────────────────────
+    bc.print_chain();
+
+    // ── BALANCES ──────────────────────────────────────────────
+    println!("💰 BALANCES (replayed from genesis):");
+    println!("{}", "─".repeat(48));
+    print_balance("Alice", bc.get_balance(&alice.address()));
+    print_balance("Bob  ", bc.get_balance(&bob.address()));
+    print_balance("Carol", bc.get_balance(&carol.address()));
+    print_balance("Miner", bc.get_balance(&miner.address()));
+
+    // ── CHAIN VALIDATION (clean) ──────────────────────────────
+    println!("\n🔍 VALIDATION:");
+    println!("{}", "─".repeat(48));
+    println!("  Clean chain valid : {}", bc.is_valid());
+
+    // ── TAMPER ATTACK DEMO ────────────────────────────────────
+    // Attacker modifies a transaction amount directly in memory.
+    // Two things catch it:
+    //   1. Block hash changes (calculate_hash covers all txn data)
+    //   2. Signature fails  (signature was over original amount)
+    println!("\n⚠️  TAMPER ATTACK: changing Bob's amount to 9999...");
+    bc.chain[1].transactions[0].amount = 9_999_000; // 9999 tokens in nits
+    println!("  Chain valid after tamper : {}", bc.is_valid());
+
+    // ── WRONG WALLET DEMO ─────────────────────────────────────
+    // Bob tries to sign a transaction from Alice's address — caught immediately.
+    println!("\n🚨 WRONG WALLET: Bob tries to sign as Alice...");
+    let mut fake = Transaction::new(alice.address(), carol.address(), 500.0);
+    match fake.sign(&bob) {
+        Ok(_)    => println!("  Signed (this should never print)"),
+        Err(msg) => println!("  Rejected at signing: {}", msg),
     }
 
-    println!("\n--- Validation (clean chain) ---");
-    println!("Chain valid: {}", blockchain.is_valid());
+    // ── UNSIGNED TRANSACTION DEMO ─────────────────────────────
+    // What if someone skips signing and submits directly?
+    println!("\n🚨 UNSIGNED TX: submitting without signing...");
+    let unsigned = Transaction::new(alice.address(), bob.address(), 50.0);
+    match bc.add_transaction(unsigned) {
+        Ok(_)    => println!("  Accepted (this should never print)"),
+        Err(msg) => println!("  Rejected at mempool: {}", msg),
+    }
 
-    // Tamper demo
-    println!("\n--- Simulating Tamper Attack ---");
-    blockchain.chain[1].data = "Alice sends Bob 1000 tokens".to_string();
+    println!("\n╔══════════════════════════════════════════════╗");
+    println!("║  All demos complete ✅                        ║");
+    println!("╚══════════════════════════════════════════════╝");
+}
 
-    println!("\n--- Validation (after tamper) ---");
-    println!("Chain valid: {}", blockchain.is_valid());
+/// Helper: prints Ok/Err result with a label — avoids repeating match blocks
+fn handle<E: std::fmt::Display>(result: Result<(), E>, label: &str) {
+    match result {
+        Ok(_)    => println!("  ✅ {}", label),
+        Err(msg) => println!("  ❌ {} FAILED: {}", label, msg),
+    }
+}
+
+/// Helper: prints balance result cleanly
+fn print_balance(name: &str, result: Result<f64, String>) {
+    match result {
+        Ok(bal)  => println!("  {} : {:.3} tokens", name, bal),
+        Err(msg) => println!("  {} : ERROR — {}", name, msg),
+    }
 }

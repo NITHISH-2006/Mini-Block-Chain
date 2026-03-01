@@ -13,7 +13,12 @@ async fn main() -> std::io::Result<()> {
         blockchain: Mutex::new(blockchain::Blockchain::new("00")),
     });
 
-    println!("blockchain running on http://localhost:8080");
+    // Railway injects PORT as an environment variable
+    // locally it falls back to 8080
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+
+    println!("running on http://{}", addr);
 
     HttpServer::new(move || {
         App::new()
@@ -25,7 +30,7 @@ async fn main() -> std::io::Result<()> {
             .route("/balance/{address}", web::get().to(api::get_balance))
             .route("/validate",          web::get().to(api::validate_chain))
     })
-    .bind("127.0.0.1:8080")?
+    .bind(&addr)?
     .run()
     .await
 }

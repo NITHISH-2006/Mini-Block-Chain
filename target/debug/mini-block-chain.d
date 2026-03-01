@@ -1,1 +1,0 @@
-D:\PROGRAM\ FILES\doSomething\Web3\web3\ projects\mini-chain\mini-block-chain\target\debug\mini-block-chain.exe: D:\PROGRAM\ FILES\doSomething\Web3\web3\ projects\mini-chain\mini-block-chain\src\main.rs

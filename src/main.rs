@@ -10,7 +10,7 @@ use std::sync::Mutex;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let state = web::Data::new(api::AppState {
-        blockchain: Mutex::new(blockchain::Blockchain::new("00")),
+        blockchain: Mutex::new(blockchain::Blockchain::new("0")),
     });
 
     // Railway injects PORT as an environment variable

@@ -1,118 +1,150 @@
-# Mini-Block-Chain ⛏️
+# Mini Blockchain ⛏️
 
-Single-node Proof of Work miner written in Rust.  
-First Rust program I've ever written. Gave myself 6 hours.
+Started as a 6-hour timebox to understand how a single block gets mined. Kept going.
 
----
-
-## Why I built this
-
-I've been doing React and JavaScript for a while and wanted to understand what's
-actually happening inside a blockchain node — not conceptually, but in code.
-What does a block look like in memory? How does SHA-256 hashing actually work?
-Why is mining slow but verification instant?
-
-So I gave myself a 6-hour timebox and wrote it in Rust, because if I'm going to
-poke at protocol-level stuff, I should probably stop using a garbage-collected language.
+This is the same project — I just didn't stop after the first block.
 
 ---
 
-## What it does
+## What it is now
 
-1. Creates a `Block` struct — index, timestamp, data, previous hash, nonce, current hash
-2. Hashes the block with SHA-256, packing every field into a single input string
-3. Mines it — keeps incrementing the nonce until the hash starts with `0000`
-4. Prints the result
+A working blockchain node with a REST API. You can create wallets, sign transactions, mine blocks, and query balances over HTTP. Written in Rust. Started from zero Rust knowledge.
 
-That's it. No UI. No server. Just a block getting mined in a terminal.
+**v1** — one block, one file, SHA-256 hashing, proof of work. Built for a hiring round.  
+**v2** — added wallets, signed transactions, mempool, chain validation, balance replay.  
+**v3** — wrapped everything in a REST API using actix-web.
 
 ---
 
 ## Run it
 
-Need Rust installed. If you don't have it:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-
-Then:
-```bash
 git clone https://github.com/NITHISH-2006/Mini-Block-Chain.git
 cd Mini-Block-Chain
 cargo run
 ```
 
-Output looks like this:
+Server starts at `http://localhost:3000`.
+
+---
+
+## What you can do
+
 ```
-Mining Genesis Block...
-Block Mined! Nonce required: 95190
-Block {
-    index: 0,
-    timestamp: 1771765906,
-    data: "Genesis Block - Built for Hashira Context",
-    previous_hash: "0",
-    nonce: 95190,
-    hash: "0000ce58893a98c70e62f53a63b058e95b3dad32de4f8a65a319e1669aeb185c",
+GET  /wallet/new           — generate a wallet (address + private key)
+POST /transaction          — send tokens from one wallet to another
+POST /mine                 — mine pending transactions into a block
+GET  /chain                — see the full blockchain as JSON
+GET  /balance/:address     — check any wallet's balance
+GET  /validate             — verify the chain hasn't been tampered with
+```
+
+### Try it in order
+
+**1. Make two wallets**
+```
+GET /wallet/new   ← do this twice, save both responses
+```
+
+**2. Send a transaction**
+```
+POST /transaction
+{
+  "from": "ALICE_ADDRESS",
+  "to": "BOB_ADDRESS",
+  "amount": 25,
+  "private_key_hex": "ALICE_PRIVATE_KEY"
 }
 ```
 
-The nonce changes every run because the timestamp is part of the hash input.
-
----
-
-## Things I actually learned writing this
-
-**Ownership stopped me from doing dumb things**  
-`calculate_hash(&self)` borrows the block to read it. `mine(&mut self)` explicitly
-says it's going to mutate. I couldn't mix those up even if I wanted to —
-the compiler just refuses to build. Coming from JS where you can mutate anything
-from anywhere, this was initially annoying, then obviously correct.
-
-**No null, no undefined, no surprises**  
-Reading the system clock returns a `Result`. `.unwrap()` says "crash here if
-this fails" instead of letting it silently break somewhere downstream. I kind of
-love this.
-
-**SHA-256 has no pattern**  
-Change one character anywhere in the input — different block index, one extra
-space in the data — and the output is completely unrecognizable. There's no
-gradient, no shortcut. The only way to find a hash starting with `0000` is to
-try ~65,000 times on average and get lucky. Verification is one hash call.
-That gap between producing and verifying a valid block is the whole point of PoW.
-
----
-
-## Adjusting difficulty
-```rust
-genesis_block.mine("0000");   // ~65k attempts on average
-genesis_block.mine("00000");  // ~1M attempts — takes noticeably longer
-genesis_block.mine("000");    // ~4k attempts — almost instant
+**3. Mine it**
+```
+POST /mine
+{
+  "miner_address": "ALICE_ADDRESS"
+}
 ```
 
-Each zero multiplies the expected work by 16.
+**4. Check balances**
+```
+GET /balance/ALICE_ADDRESS
+GET /balance/BOB_ADDRESS
+```
+
+Alice gets 50 tokens for mining. Bob gets 25 from the transaction.
+
+---
+
+## How it actually works
+
+### Wallets
+
+A wallet is just an ed25519 keypair. The public key is your address — a 64 character hex string. The private key never leaves your hands.
+
+When you send tokens, your private key signs a hash of `(from + to + amount)`. That signature proves you authorized the transaction. Anyone can verify it using your public key, which is just your address. No lookup table. No central authority. The math is self-contained.
+
+### Transactions
+
+Each transaction has a sender, receiver, amount, and a signature. Before a transaction touches the mempool, it gets validated — signature checked, amount nonzero, sender address parses as a real public key.
+
+Amounts are stored as `u64` integers called nits (1 token = 1000 nits). `f64` would give you `0.1 + 0.2 = 0.30000000000000004`. For money that's a bug. Same reason Bitcoin uses satoshis.
+
+### Mempool
+
+Transactions don't go directly into a block. They sit in the mempool — a waiting room. When someone mines, they drain the mempool, bundle everything into a block, add a coinbase transaction rewarding themselves 50 tokens, and do proof of work.
+
+### Blocks
+
+Each block holds a list of transactions. The block's hash covers every field — index, timestamp, all transaction data, previous hash, nonce. Change anything in any transaction and the hash changes. The chain breaks. You can't quietly edit history.
+
+### Chain validation
+
+Three checks on every block:
+1. Recalculate the block's hash — does it match what's stored?
+2. Does `previous_hash` match the actual previous block's hash?
+3. Is every transaction's signature valid?
+
+All three have to pass. The tamper demo at `/validate` breaks the first two simultaneously by modifying a transaction amount.
+
+### Mining
+
+Same as v1. Keep incrementing the nonce until the hash starts with the difficulty prefix. Each extra zero multiplies expected work by 16. Verification is one hash call. That asymmetry is the whole point.
+
+---
+
+## What I learned building this
+
+**Ed25519 over RSA** — faster, smaller keys, used by Solana. Bitcoin uses secp256k1 which is a different elliptic curve but the same idea.
+
+**`Result<>` everywhere** — v1 had `unwrap()` calls that would crash on bad input. v2 returns descriptive errors up the call stack. The `?` operator makes this clean — if something fails, return the error to the caller and let them decide what to do.
+
+**Mutex for shared state** — actix-web handles requests concurrently. Two simultaneous POST /mine requests could corrupt the chain. Wrapping the blockchain in a `Mutex` means only one request touches it at a time.
+
+**Serialization** — ed25519 signatures are raw bytes. JSON doesn't know what to do with raw bytes. Converting signatures to hex strings before storing them means they serialize cleanly and can be decoded back later.
+
+**Balances by replay** — there's no stored balance anywhere. Every call to `/balance/:address` walks the entire chain from block 0, adding incoming amounts and subtracting outgoing ones. Slower than caching, but the result is always consistent with what's actually on chain. Bitcoin's UTXO model is a more efficient version of this same idea.
+
+---
+
+## Project structure
+
+```
+src/
+├── main.rs         — starts the actix-web server
+├── api.rs          — route handlers
+├── blockchain.rs   — chain, mempool, balance replay, validation
+├── block.rs        — block struct, hashing, proof of work
+├── transaction.rs  — signed transfer, validation
+└── wallet.rs       — ed25519 keypair, signing, serialization
+```
 
 ---
 
 ## What's next
 
-- [ ] Add a `Blockchain` struct — a `Vec<Block>` with chain validation so tampering any block breaks everything after it
-- [ ] Parallel mining with `rayon` — split the nonce range across threads
-- [ ] `axum` HTTP layer — `GET /chain` and `POST /mine` so it runs as an actual node
+HTLC atomic swap — a Hash Time-Locked Contract. You lock tokens with a secret hash. The other party claims them by revealing the secret, which simultaneously releases their payment to you. No middleman, no trust required. This is the core mechanic behind [Garden by Hashira](https://hashira.io), which is what pulled me into this in the first place.
 
 ---
 
-## Project structure
-```
-Mini-Block-Chain/
-├── src/
-│   └── main.rs
-├── Cargo.toml
-└── Cargo.lock
-```
-
-One dependency: `sha2` for SHA-256.
-
----
-
-*First Rust project. 6-hour timebox. CS student, graduating 2027.*  
-*Trying to understand systems from the ground up before I have to work on them.*
+CS student, graduating 2027. Building from the ground up.  
+[Nithish Chandrasekaran](https://linkedin.com/in/nithish-chandrasekaran/)

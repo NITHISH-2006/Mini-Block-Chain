@@ -1,5 +1,5 @@
 [package]
-name = "mini-block-chain"
+name = "mini-blockchain"
 version = "0.3.0"
 edition = "2021"
 

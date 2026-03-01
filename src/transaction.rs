@@ -1,52 +1,38 @@
-// ============================================================
-// TRANSACTION MODULE  (v2.1 — fixed)
-// ------------------------------------------------------------
-// FIXES from v2:
-//   1. f64 → u64 for amount  (no floating point precision errors)
-//   2. Result<> error handling (no unwrap() crashes)
-//   3. sign() validates you're using the correct wallet
-//
-// AMOUNT UNIT — "nits":
-//   1 token = 1000 nits (stored as u64 integers)
-//   Why? f64: 0.1 + 0.2 = 0.30000000000000004 — WRONG for money
-//        u64: 100 + 200 = 300 — always exact
-//   Bitcoin calls them "satoshis" (1 BTC = 100,000,000 satoshis)
-// ============================================================
+// Transaction — signed transfer of tokens between two addresses.
+// Amounts stored as u64 "nits" (1 token = 1000 nits) to avoid f64 precision errors.
+// Signature stored as hex string so it can be serialized to JSON.
 
 use sha2::{Sha256, Digest};
 use ed25519_dalek::{VerifyingKey, Signature};
+use serde::{Serialize, Deserialize};
 use crate::wallet::{Wallet, verify_signature};
 
 pub const NITS_PER_TOKEN: u64 = 1000;
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Transaction {
-    pub from:      String,
-    pub to:        String,
-    pub amount:    u64,               // stored in nits, NOT tokens
-    pub signature: Option<Signature>,
+    pub from:          String,
+    pub to:            String,
+    pub amount:        u64,             // in nits
+    pub signature_hex: Option<String>,  // hex string — serializes cleanly to JSON
 }
 
 impl Transaction {
-    /// Create transaction using human-friendly token amount (e.g. 10.5 tokens)
-    /// Internally stored as nits: 10.5 → 10500
     pub fn new(from: String, to: String, amount_tokens: f64) -> Self {
         let amount_nits = (amount_tokens * NITS_PER_TOKEN as f64).round() as u64;
-        Transaction { from, to, amount: amount_nits, signature: None }
+        Transaction { from, to, amount: amount_nits, signature_hex: None }
     }
 
-    /// Create directly in nits (used for coinbase/reward transactions)
     pub fn new_nits(from: String, to: String, amount_nits: u64) -> Self {
-        Transaction { from, to, amount: amount_nits, signature: None }
+        Transaction { from, to, amount: amount_nits, signature_hex: None }
     }
 
-    /// Convert internal nits back to human-readable tokens for display
     pub fn amount_as_tokens(&self) -> f64 {
         self.amount as f64 / NITS_PER_TOKEN as f64
     }
 
-    /// The exact bytes that get signed.
-    /// We hash (from + to + amount_nits) → 32 fixed bytes.
-    /// Hashing first means: change even 1 nit → completely different hash → signature breaks.
+    /// The exact bytes we sign — hash of (from + to + amount_nits).
+    /// Hashing first gives fixed 32 bytes regardless of address length.
     pub fn message_to_sign(&self) -> Vec<u8> {
         let data = format!("{}{}{}", self.from, self.to, self.amount);
         let mut hasher = Sha256::new();
@@ -54,75 +40,64 @@ impl Transaction {
         hasher.finalize().to_vec()
     }
 
-    /// FIX: now returns Result<(), String> instead of silently failing.
-    /// Also validates: the wallet you're signing with MUST match self.from.
-    /// This prevents accidentally authorising someone else's transaction.
+    /// Sign with sender's wallet. Validates wallet matches self.from.
     pub fn sign(&mut self, wallet: &Wallet) -> Result<(), String> {
         if self.from != "NETWORK" && wallet.address() != self.from {
             return Err(format!(
-                "Wrong wallet — transaction sender is {}... but wallet address is {}...",
-                &self.from[..12],
-                &wallet.address()[..12]
+                "Wrong wallet — sender is {}... but wallet is {}...",
+                &self.from[..12], &wallet.address()[..12]
             ));
         }
         let msg = self.message_to_sign();
-        self.signature = Some(wallet.sign(&msg));
+        let sig: Signature = wallet.sign(&msg);
+        // Store as hex string so JSON serialization works cleanly
+        self.signature_hex = Some(hex::encode(sig.to_bytes()));
         Ok(())
     }
 
-    /// Full validation — returns descriptive error so you know exactly WHY it failed.
-    /// Replaces the old is_valid() bool which told you nothing useful on failure.
+    /// Full validation — returns descriptive Err so caller knows exactly why it failed.
     pub fn validate(&self) -> Result<(), String> {
-        // Rule 1: NETWORK coinbase transactions are exempt from signature rules
-        if self.from == "NETWORK" {
-            return Ok(());
-        }
+        if self.from == "NETWORK" { return Ok(()); }
 
-        // Rule 2: Can't send 0 tokens
         if self.amount == 0 {
-            return Err("Transaction amount cannot be zero".to_string());
+            return Err("Amount cannot be zero".to_string());
         }
 
-        // Rule 3: Must have a signature
-        let sig = self.signature.as_ref()
-            .ok_or_else(|| "Transaction has no signature — call .sign() first".to_string())?;
+        let sig_hex = self.signature_hex.as_ref()
+            .ok_or("Transaction is unsigned — call sign() first")?;
 
-        // Rule 4: Decode sender's public key from their hex address
+        // Decode signature from hex back to bytes
+        let sig_bytes = hex::decode(sig_hex)
+            .map_err(|_| "Signature is not valid hex".to_string())?;
+        let sig_array: [u8; 64] = sig_bytes.try_into()
+            .map_err(|_| "Signature has wrong byte length".to_string())?;
+        let signature = Signature::from_bytes(&sig_array);
+
+        // Decode sender's public key from their address (address IS the public key)
         let key_bytes = hex::decode(&self.from)
-            .map_err(|_| format!("Cannot decode sender address as hex: {}", &self.from[..12]))?;
-
+            .map_err(|_| "Sender address is not valid hex".to_string())?;
         let key_array: [u8; 32] = key_bytes.try_into()
-            .map_err(|_| "Sender address has wrong byte length (expected 32)".to_string())?;
-
+            .map_err(|_| "Sender address has wrong byte length".to_string())?;
         let verifying_key = VerifyingKey::from_bytes(&key_array)
             .map_err(|_| "Sender address is not a valid ed25519 public key".to_string())?;
 
-        // Rule 5: The signature must match this exact transaction data
         let msg = self.message_to_sign();
-        if verify_signature(&verifying_key, &msg, sig) {
+        if verify_signature(&verifying_key, &msg, &signature) {
             Ok(())
         } else {
-            Err("Signature is invalid — transaction data may have been tampered with".to_string())
+            Err("Signature invalid — transaction may have been tampered".to_string())
         }
     }
 
-    /// Convenience wrapper — bool for backwards compatibility
-    pub fn is_valid(&self) -> bool {
-        self.validate().is_ok()
-    }
+    #[allow(dead_code)]
+    pub fn is_valid(&self) -> bool { self.validate().is_ok() }
 
     pub fn display(&self) -> String {
-        let from_short = if self.from == "NETWORK" {
-            "NETWORK".to_string()
-        } else {
-            format!("{}...", &self.from[..10])
-        };
+        let from_short = if self.from == "NETWORK" { "NETWORK".to_string() }
+                         else { format!("{}...", &self.from[..10]) };
         let to_short = format!("{}...", &self.to[..10]);
-        format!(
-            "{} → {} : {} tokens [{}]",
-            from_short, to_short,
-            self.amount_as_tokens(),
-            if self.signature.is_some() { "✅ signed" } else { "❌ unsigned" }
-        )
+        format!("{} → {} : {} tokens [{}]",
+            from_short, to_short, self.amount_as_tokens(),
+            if self.signature_hex.is_some() { "✅ signed" } else { "❌ unsigned" })
     }
 }
